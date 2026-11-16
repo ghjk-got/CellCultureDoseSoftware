@@ -1,0 +1,9 @@
+{
+  "data_dir": "D:\\ProgramData\\CellCultureDoseSoftware_V1.0\\DemoData",
+  "operator": "Administrator",
+  "max_sample_gap_h": 2.0,
+  "default_volume_unit": "mL",
+  "default_flow_unit": "mL/h",
+  "timezone_note": "本机时区",
+  "last_batch_id": "BAT-0F0A5CC40D00"
+}

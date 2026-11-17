@@ -234,6 +234,8 @@ class BatchRepo(CrudRepo):
         bid = new_id("BAT")
         ts = now_iso()
         with self.db.transaction() as cur:
+            if data.get("status", "进行中") == "进行中" and cur.execute("SELECT 1 FROM batch_info WHERE status='进行中' LIMIT 1").fetchone():
+                raise ValueError("已有进行中的批次，请先结束后再创建新的进行中批次")
             cur.execute(
                 "INSERT INTO batch_info(batch_id,batch_code,project_name,culture_system,reactor_id,"
                 "working_volume_ml,start_time,end_time,status,notes,created_at,created_by) "
@@ -250,6 +252,22 @@ class BatchRepo(CrudRepo):
                     (new_id("STG"), bid, name, None, None, i, note),
                 )
         return bid
+
+    def update(self, key: str, data: dict) -> None:
+        """批次状态变更时检查其他批次和未结束的手工补料。"""
+        cols = [c for c in self.fields if c in data]
+        if not cols:
+            return
+        with self.db.transaction() as cur:
+            current = cur.execute("SELECT status FROM batch_info WHERE batch_id=?", (key,)).fetchone()
+            if not current:
+                raise ValueError("批次不存在")
+            target = data.get("status", current["status"])
+            if target == "进行中" and current["status"] != "进行中" and cur.execute("SELECT 1 FROM batch_info WHERE status='进行中' AND batch_id<>?", (key,)).fetchone():
+                raise ValueError("已有进行中的批次，无法将此批次设为进行中")
+            if current["status"] == "进行中" and target != "进行中" and cur.execute("SELECT 1 FROM manual_feed_record WHERE batch_id=? AND lifecycle_status='进行中'", (key,)).fetchone():
+                raise ValueError("存在进行中的补料，请先结束或注明原因标记为未完成")
+            cur.execute("UPDATE batch_info SET " + ",".join(f"{c}=?" for c in cols) + " WHERE batch_id=?", [data[c] for c in cols] + [key])
 
     def code_exists(self, code: str, exclude: str = "") -> bool:
         return self.db.q1("SELECT batch_id FROM batch_info WHERE batch_code=? AND batch_id<>?",
@@ -553,13 +571,13 @@ class DoseRepo(CrudRepo):
         self.db.execute(
             "INSERT INTO dose_calculation(calculation_id,batch_id,event_id,pump_id,liquid_id,time_start,time_end,"
             "planned_volume_ml,actual_volume_ml,flow_integral_ml,deviation_ml,deviation_percent,completion_percent,"
-            "calculation_method,quality_status,calculation_version,calculated_at,data_import_id,notes) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "calculation_method,quality_status,calculation_version,calculated_at,data_import_id,notes,value_source) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (cid, data["batch_id"], data.get("event_id") or None, data["pump_id"], data.get("liquid_id"),
              data["time_start"], data["time_end"], data.get("planned_volume_ml"), data.get("actual_volume_ml"),
              data.get("flow_integral_ml"), data.get("deviation_ml"), data.get("deviation_percent"),
              data.get("completion_percent"), data.get("calculation_method"), data.get("quality_status"),
-             ver, now_iso(), data.get("data_import_id"), data.get("notes", "")),
+             ver, now_iso(), data.get("data_import_id"), data.get("notes", ""), data.get("value_source", "来源待核实")),
         )
         return cid
 

@@ -9,18 +9,23 @@ from .importers.dose_importer import DoseImportService
 from .repositories import Repositories
 from .services.backup import BackupService
 from .services.reporting import ReportService
+from .services.manual_feed import ManualFeedService
 
 
 class AppContext:
     def __init__(self):
         self.settings = Settings.load()
+        first_install = not self.settings.db_path.exists()
         self.db = Database(self.settings.db_path)
         self.db.seed_defaults()
+        if first_install:
+            self.db.set_setting("initial_setup", "pending")
         self.repos = Repositories(self.db)
         self.reports = ReportService(self.repos, self.settings)
         self.backups = BackupService(self.db, self.settings)
         self.dose_import = DoseImportService(self.repos, self.settings)
         self.calibration_import = CalibrationImportService(self.repos, self.settings)
+        self.manual_feed = ManualFeedService(self.db)
 
     @property
     def operator(self) -> str:

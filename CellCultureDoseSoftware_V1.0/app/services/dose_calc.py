@@ -191,15 +191,34 @@ def calculate(rows: Sequence[dict], planned_ml: float | None,
     anomalies = list(seg_issues)
     cumulative = cumulative_volume(segments)
     integral = flow_integral(segments, max_gap_h)
-    for gap in integral["gaps"]:
+    # 数据间隔与是否有流速列无关；仅检查流速会漏掉仅有累计值的数据。
+    gaps = []
+    for left, right in zip(segments, segments[1:]):
+        hours = (right["_dt"] - left["_dt"]).total_seconds() / 3600
+        if hours > max_gap_h:
+            gaps.append({"from": iso(left["_dt"]), "to": iso(right["_dt"]), "hours": round(hours, 4)})
+    for gap in gaps:
         anomalies.append({
             "anomaly_type": "数据断点",
             "severity": "警告",
             "description": f"{gap['from']} 至 {gap['to']} 采样间隔 {gap['hours']} h 超过允许值 {max_gap_h:g} h，"
-                           f"流速积分跳过该区间",
+                           f"请核查该区间的数据覆盖",
         })
+    coverage_incomplete = bool(segments and ((start_dt and segments[0]["_dt"] > start_dt) or
+                                             (end_dt and segments[-1]["_dt"] < end_dt)))
+    # 即使窗口边缘有流速记录，累计值可能只覆盖其中一部分。
+    if cumulative["parts"]:
+        part_start = parse_ts(cumulative["parts"][0]["start"])
+        part_end = parse_ts(cumulative["parts"][-1]["end"])
+        coverage_incomplete |= bool((start_dt and part_start > start_dt) or (end_dt and part_end < end_dt))
+    if coverage_incomplete:
+        anomalies.append({"anomaly_type": "时间窗口覆盖不足", "severity": "警告",
+                          "description": "首末数据未覆盖完整核算窗口，不能直接代表整个窗口。"})
 
     actual = cumulative["volume_ml"]
+    # 归零前后的未观测部分无法重建，不能把各段差值当作完整剂量。
+    if any(a["anomaly_type"] == "计数器重置/分段" for a in anomalies):
+        actual = None
     integral_ml = integral["volume_ml"]
     warnings: list[str] = []
     if actual is not None and integral_ml is not None and actual > 1e-9:
@@ -223,10 +242,10 @@ def calculate(rows: Sequence[dict], planned_ml: float | None,
         quality = "无效"
         method = "无数据"
     elif actual is None and integral_ml is None:
-        quality = "无效"
+        quality = "待审核" if anomalies else "无效"
         method = "数据不足"
     elif actual is None:
-        quality = "估算"
+        quality = "待审核" if anomalies else "估算"
         method = "流速积分"
     else:
         method = "累计体积差" + ("+流速积分校验" if integral_ml is not None else "")
@@ -249,7 +268,7 @@ def calculate(rows: Sequence[dict], planned_ml: float | None,
         "segments": cumulative["parts"],
         "coverage_start": iso(first),
         "coverage_end": iso(last),
-        "gaps": integral["gaps"],
+        "gaps": gaps,
         "warnings": warnings,
         "anomalies": anomalies,
         "message": "；".join(warnings) if warnings else "",

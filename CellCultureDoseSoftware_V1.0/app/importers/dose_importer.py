@@ -43,8 +43,8 @@ class DoseImportService:
         return auto_map(headers)
 
     def preview(self, batch_id: str, path: str | Path, sheet: str | None, header_row: int,
-                mapping: dict[str, int], default_flow_unit: str = "mL/h",
-                default_volume_unit: str = "mL") -> Preview:
+                mapping: dict[str, int], default_flow_unit: str = "",
+                default_volume_unit: str = "") -> Preview:
         table = self.read(path, sheet, header_row)
         pv = Preview(table=table, mapping=dict(mapping))
         prev_by_pump: dict[str, tuple[str, float | None]] = {}
@@ -74,6 +74,9 @@ class DoseImportService:
             flow, embedded_flow_unit = split_number_unit(flow_raw)
             flow_unit = str(get("flow_unit") or embedded_flow_unit or default_flow_unit).strip()
             if flow is not None:
+                if not flow_unit:
+                    pv.errors.append({"row": row_no, "field": "流速单位", "message": "请明确选择流速单位或映射单位列"})
+                    continue
                 try:
                     flow = flow_to_ml_h(flow, flow_unit)
                     flow_unit = "mL/h"
@@ -85,6 +88,9 @@ class DoseImportService:
             total, embedded_vol_unit = split_number_unit(total_raw)
             volume_unit = str(get("volume_unit") or embedded_vol_unit or default_volume_unit).strip()
             if total is not None:
+                if not volume_unit:
+                    pv.errors.append({"row": row_no, "field": "体积单位", "message": "请明确选择体积单位或映射单位列"})
+                    continue
                 try:
                     total = volume_to_l(total, volume_unit) * 1000.0
                     volume_unit = "mL"

@@ -12,7 +12,10 @@ from .theme import COLORS, FONT, FONT_BOLD, FONT_SMALL, setup_theme
 from .widgets import center_window
 
 PAGE_INFO = {
-    "dashboard": ("app.ui.pages.dashboard", "DashboardPage", "首页", "批次概览、待处理事项与快速入口"),
+    "medium_work": ("app.ui.pages.workflows", "MediumPage", "培养基配制", "成品登记与配方配制"),
+    "feed_work": ("app.ui.pages.workflows", "FeedPage", "补料记录", "开始、结束和核查补料"),
+    "resources": ("app.ui.pages.workflows", "ResourcesPage", "资料与设置", "设备资料、低频功能与系统设置"),
+    "dashboard": ("app.ui.pages.dashboard", "DashboardPage", "首页与批次", "当前批次、补料进度与待处理事项"),
     "master": ("app.ui.pages.master_data", "MasterDataPage", "基础数据", "组分、工艺液、泵与反应器档案"),
     "formula": ("app.ui.pages.formula", "FormulaPage", "配方管理", "配方版本、组分明细与发布状态"),
     "preparation": ("app.ui.pages.preparation", "PreparationPage", "配制计算", "目标浓度、纯度修正、母液与称量清单"),
@@ -51,6 +54,12 @@ class MainWindow(tk.Tk):
         self._bind_shortcuts()
         self.refresh_batches()
         self.go("dashboard")
+        if self.ctx.db.get_setting("initial_setup") == "pending":
+            self.after_idle(self._show_initial_setup)
+
+    def _show_initial_setup(self):
+        from .pages.setup_wizard import SetupWizard
+        SetupWizard(self)
 
     # ---------- 布局 ----------
     def _build_layout(self) -> None:
@@ -74,12 +83,8 @@ class MainWindow(tk.Tk):
 
         nav = tk.Frame(self.sidebar, bg=COLORS["sidebar"])
         nav.pack(fill="both", expand=True, padx=10, pady=(6, 0))
-        items = [
-            ("dashboard", "首页与工作台"), ("master", "基础数据"), ("formula", "配方管理"),
-            ("preparation", "配制计算"), ("batch", "批次管理"), ("plan", "补料计划"),
-            ("calibration", "泵校准"), ("dose_import", "剂量导入"), ("dose_calc", "剂量核算"),
-            ("anomaly", "异常审核"), ("reports", "报告中心"), ("settings", "系统设置"),
-        ]
+        items = [("dashboard", "首页与批次"), ("medium_work", "培养基配制"),
+                 ("feed_work", "补料记录"), ("resources", "资料与设置")]
         for key, label in items:
             btn = tk.Button(nav, text=f"    {label}", anchor="w", bg=COLORS["sidebar"],
                             fg=COLORS["sidebar_text"], activebackground=COLORS["sidebar_hover"],
@@ -140,8 +145,7 @@ class MainWindow(tk.Tk):
                  font=(FONT[0], 8), anchor="e").pack(side="right", padx=18)
 
     def _bind_shortcuts(self) -> None:
-        keys = ["dashboard", "master", "formula", "preparation", "batch", "plan",
-                "calibration", "dose_import", "dose_calc", "anomaly", "reports", "settings"]
+        keys = ["dashboard", "medium_work", "feed_work", "resources"]
         for i, key in enumerate(keys[:9]):
             self.bind_all(f"<Control-Key-{i + 1}>", lambda e, k=key: self.go(k))
         self.bind_all("<Control-Key-0>", lambda e: self.go("settings"))
@@ -166,7 +170,8 @@ class MainWindow(tk.Tk):
             old = self.pages.get(self.current_key)
             if old is not None:
                 old.pack_forget()
-            self.nav_buttons[self.current_key].configure(bg=COLORS["sidebar"], fg=COLORS["sidebar_text"])
+            for button in self.nav_buttons.values():
+                button.configure(bg=COLORS["sidebar"], fg=COLORS["sidebar_text"])
         module_name, class_name, title, subtitle = PAGE_INFO[key]
         if key not in self.pages:
             module = importlib.import_module(module_name)
@@ -177,7 +182,11 @@ class MainWindow(tk.Tk):
         self.current_key = key
         self.page_title.configure(text=title)
         self.page_subtitle.configure(text=subtitle)
-        self.nav_buttons[key].configure(bg=COLORS["sidebar_active"], fg="white")
+        group = ({"batch": "dashboard", "reports": "dashboard", "preparation": "medium_work",
+                  "plan": "feed_work", "dose_calc": "feed_work", "anomaly": "feed_work",
+                  "master": "resources", "formula": "resources", "calibration": "resources",
+                  "dose_import": "resources", "settings": "resources"}).get(key, key)
+        self.nav_buttons[group].configure(bg=COLORS["sidebar_active"], fg="white")
         try:
             page.on_show()
         except Exception:

@@ -52,11 +52,14 @@ class ReportService:
                 calibrations.append(rec)
         imports = self.repos.imports.list_recent(batch_id, 500)
         calculations = self.repos.doses.list_for_batch(batch_id)
+        from .manual_feed import ManualFeedService
+        manual = ManualFeedService(self.db).list_for_batch(batch_id)
+        commercial = [dict(r) for r in self.db.q("SELECT * FROM commercial_medium_record WHERE batch_id=? ORDER BY used_at", (batch_id,))]
         anomalies = self.repos.anomalies.list_for_batch(batch_id)
         reports = self.repos.reports.list_for_batch(batch_id)
         return {"batch": batch, "stages": stages, "parameters": params, "mappings": mappings,
                 "preparations": preparations, "plan": plan, "events": events,
-                "calibrations": calibrations, "imports": imports, "calculations": calculations,
+                "calibrations": calibrations, "imports": imports, "calculations": calculations, "manual": manual, "commercial": commercial,
                 "anomalies": anomalies, "reports": reports}
 
     def _target_dir(self, batch_code: str) -> Path:
@@ -232,13 +235,24 @@ class ReportService:
 
         # 剂量核算
         write_sheet("剂量核算",
-                    ["核算编号", "泵", "液体", "开始", "结束", "计划量(mL)", "实际量(mL)", "流速积分(mL)",
-                     "偏差(mL)", "偏差率(%)", "完成率(%)", "方法", "质量状态", "版本", "计算时间"],
+                    ["核算编号", "泵", "液体", "开始", "结束", "计划量(mL)", "累计差值(mL)", "流速积分(mL)",
+                     "偏差(mL)", "偏差率(%)", "完成率(%)", "方法", "质量状态", "版本", "计算时间", "来源"],
                     [[c.get("calculation_id"), c.get("pump_code"), c.get("liquid_name"), c.get("time_start"),
                       c.get("time_end"), c.get("planned_volume_ml"), c.get("actual_volume_ml"),
                       c.get("flow_integral_ml"), c.get("deviation_ml"), c.get("deviation_percent"),
                       c.get("completion_percent"), c.get("calculation_method"), c.get("quality_status"),
-                      c.get("calculation_version"), c.get("calculated_at")] for c in data["calculations"]])
+                      c.get("calculation_version"), c.get("calculated_at"), c.get("value_source", "来源待核实")] for c in data["calculations"]])
+
+        write_sheet("手工补料记录", ["记录编号", "泵", "液体", "计划事件", "开始", "结束", "开始读数", "结束读数", "单位", "中途读数", "计划量(mL)", "设备估算量(mL)", "估算偏差(mL)", "独立实测量(mL)", "实测方法", "实测偏差(mL)", "记录状态", "核查状态", "审核原因", "设备信息", "备注"],
+                    [[m.get("record_id"), m.get("pump_code"), m.get("liquid_name"), m.get("event_id") or "计划外", m.get("start_time"), m.get("end_time"), m.get("start_reading"), m.get("end_reading"), m.get("reading_unit"), m.get("intermediate_readings"), m.get("planned_volume_ml"), m.get("estimate_ml"),
+                      m["estimate_ml"] - m["planned_volume_ml"] if m.get("estimate_ml") is not None and m.get("planned_volume_ml") is not None else None,
+                      m.get("measured_ml") if m.get("measured_ml") is not None else "未记录", m.get("measured_method"),
+                      m["measured_ml"] - m["planned_volume_ml"] if m.get("measured_ml") is not None and m.get("planned_volume_ml") is not None else None,
+                      m.get("lifecycle_status"), m.get("quality_status"), m.get("issues"), m.get("equipment_notes"), m.get("notes")] for m in data["manual"]],
+                    note="设备估算量由 Dose Monitor 累计读数得到，独立实测量另行记录。")
+
+        write_sheet("成品培养基", ["名称", "产品批号", "体积", "单位", "使用时间", "操作人", "备注"],
+                    [[m['medium_name'], m['product_lot'], m['volume'], m['volume_unit'], m['used_at'], m['operator'], m['notes']] for m in data['commercial']])
 
         # 导入记录
         write_sheet("数据导入",
@@ -329,6 +343,9 @@ class ReportService:
               [30 * mm, 20 * mm, 30 * mm, 20 * mm, 30 * mm, 20 * mm])
 
         story.append(Paragraph("二、补料计划", h2))
+        if data['commercial']:
+            story.append(Paragraph("成品培养基使用记录", h2))
+            table(["名称", "批号", "体积", "单位", "使用时间"], [[m['medium_name'], m['product_lot'] or '', m['volume'], m['volume_unit'], m['used_at']] for m in data['commercial']], [43*mm, 36*mm, 20*mm, 15*mm, 51*mm])
         if data["events"]:
             table(["阶段", "液体", "泵", "开始", "结束", "计划量(mL)", "流速(mL/h)", "状态"],
                   [[e.get("stage_name") or "", e.get("liquid_name") or "", e.get("pump_code") or "",
@@ -338,15 +355,31 @@ class ReportService:
         else:
             story.append(Paragraph("尚无补料计划事件。", body))
 
-        story.append(Paragraph("三、实际剂量核算", h2))
+        story.append(Paragraph("三、剂量核算（累计差值与来源）", h2))
         if data["calculations"]:
-            table(["泵", "液体", "计划量", "实际量", "流速积分", "偏差率", "完成率", "质量状态"],
+            table(["泵", "液体", "计划量", "累计差", "流速积分", "偏差率", "完成率", "状态/来源"],
                   [[c.get("pump_code") or "", c.get("liquid_name") or "", fmt(c.get("planned_volume_ml")),
                     fmt(c.get("actual_volume_ml")), fmt(c.get("flow_integral_ml")),
-                    fmt(c.get("deviation_percent")), fmt(c.get("completion_percent")), c.get("quality_status") or ""]
+                    fmt(c.get("deviation_percent")), fmt(c.get("completion_percent")), (c.get("quality_status") or "") + " / " + c.get("value_source", "来源待核实")]
                    for c in data["calculations"]], [18 * mm, 24 * mm, 22 * mm, 22 * mm, 22 * mm, 18 * mm, 18 * mm, 20 * mm])
         else:
             story.append(Paragraph("尚无剂量核算结果。", body))
+
+        story.append(Paragraph("手工补料记录（设备估算与独立实测）", h2))
+        if data["manual"]:
+            table(["泵 / 液体", "计划量 mL", "设备估算 mL", "独立实测 mL", "状态"],
+                  [[f"{m['pump_code']} / {m['liquid_name']}", fmt(m.get('planned_volume_ml')),
+                    fmt(m.get('estimate_ml')), fmt(m.get('measured_ml')) if m.get('measured_ml') is not None else '未记录',
+                    m['lifecycle_status'] if m['lifecycle_status'] != '已完成' else m['quality_status']] for m in data['manual']], [40*mm, 30*mm, 35*mm, 35*mm, 25*mm])
+            for m in data["manual"]:
+                planned = m.get("planned_volume_ml")
+                estimated = m.get("estimate_ml")
+                measured = m.get("measured_ml")
+                estimate_diff = fmt(estimated - planned) if estimated is not None and planned is not None else "不适用"
+                measured_diff = fmt(measured - planned) if measured is not None and planned is not None else "不适用"
+                story.append(Paragraph(f"{m['record_id']}：设备估算偏差 {estimate_diff} mL；独立实测偏差 {measured_diff} mL。", small))
+        else:
+            story.append(Paragraph("尚无手工补料记录。", body))
 
         story.append(Paragraph("四、异常记录", h2))
         if data["anomalies"]:

@@ -116,7 +116,7 @@ class DoseTest(unittest.TestCase):
                          "total_volume": total, "volume_unit": "mL",
                          "flow_rate": 10, "flow_unit": "mL/h", "pump_status": "RUN"})
         result = dose_calc.calculate(rows, 20)
-        self.assertAlmostEqual(result["actual_volume_ml"], 20.0)
+        self.assertIsNone(result["actual_volume_ml"])
         self.assertEqual(result["quality_status"], "待审核")
         self.assertTrue(result["anomalies"])
 

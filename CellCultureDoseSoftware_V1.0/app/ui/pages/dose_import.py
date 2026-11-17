@@ -204,6 +204,14 @@ class DoseImportWizard(tk.Toplevel):
         for col in range(4):
             self.map_frame.grid_columnconfigure(col, weight=1)
         ttk.Button(frame, text="自动匹配字段", style="Secondary.TButton", command=self._auto_map).pack(anchor="w", pady=10)
+        units = tk.Frame(frame, bg=COLORS["white"])
+        units.pack(fill="x")
+        tk.Label(units, text="无单位列时，请确认流速单位：", bg=COLORS["white"]).pack(side="left")
+        self.confirm_flow_unit = tk.StringVar(value="")
+        ttk.Combobox(units, textvariable=self.confirm_flow_unit, values=("", "mL/h", "mL/min", "L/h"), state="readonly", width=9).pack(side="left")
+        tk.Label(units, text="  累计量单位：", bg=COLORS["white"]).pack(side="left")
+        self.confirm_volume_unit = tk.StringVar(value="")
+        ttk.Combobox(units, textvariable=self.confirm_volume_unit, values=("", "mL", "L"), state="readonly", width=7).pack(side="left")
         tk.Label(frame, text="标准时间格式：YYYY-MM-DD HH:MM:SS；流速与累计体积可直接带单位（如 10 mL/h）。",
                  bg=COLORS["white"], fg=COLORS["muted"], font=FONT_SMALL).pack(anchor="w")
 
@@ -280,8 +288,8 @@ class DoseImportWizard(tk.Toplevel):
                 mapping = self._mapping_for_file(path, table)
                 pv = self.service.preview(self.page.app.current_batch_id, path, self.sheet_var.get() or None,
                                           int(self.header_var.get() or 1), mapping,
-                                          self.ctx.settings.default_flow_unit,
-                                          self.ctx.settings.default_volume_unit)
+                                          self.confirm_flow_unit.get(),
+                                          self.confirm_volume_unit.get())
             except Exception as exc:
                 all_errors.append({"file": path.name, "row": "-", "field": "读取", "message": str(exc)})
                 continue

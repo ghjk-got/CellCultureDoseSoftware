@@ -35,7 +35,8 @@ class BackupService:
             counter += 1
         counts = {}
         for table in ("batch_info", "formula_info", "preparation_record", "feed_plan", "pump_calibration",
-                      "import_record", "dose_calculation", "dose_anomaly", "report_record"):
+                      "import_record", "dose_calculation", "manual_feed_record", "manual_feed_revision",
+                      "commercial_medium_record", "dose_anomaly", "report_record"):
             counts[table] = int(self.db.scalar(f"SELECT COUNT(*) FROM {table}", (), 0))
         manifest = {
             "app": "CellCultureDoseSoftware",

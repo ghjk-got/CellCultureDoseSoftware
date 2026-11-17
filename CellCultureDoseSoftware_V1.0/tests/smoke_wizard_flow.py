@@ -41,6 +41,8 @@ wiz.file_list.insert("end", csv.name)
 wiz.header_var.set("1")
 wiz._load_first_table()
 wiz._auto_map()
+wiz.confirm_flow_unit.set("mL/h")
+wiz.confirm_volume_unit.set("mL")
 ok = wiz._build_previews()
 print("dose preview ok", ok, getattr(wiz, "_preview_errors", None))
 assert ok

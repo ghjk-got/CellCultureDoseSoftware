@@ -65,6 +65,7 @@ class DoseCalculationPage(Page):
         bar.pack(fill="x", pady=(8, 0))
         ttk.Button(bar, text="运行核算", style="Primary.TButton", command=self.run_calculation).pack(side="left")
         ttk.Button(bar, text="保存核算结果", style="Success.TButton", command=self.save_result).pack(side="left", padx=8)
+        ttk.Button(bar, text="手工补料记录", command=self.open_manual).pack(side="left")
         tk.Label(bar, text="允许采样间隔 (h)", bg=COLORS["white"], fg=COLORS["muted"], font=FONT_SMALL).pack(side="left", padx=(16, 4))
         self.gap_var = tk.StringVar(value=str(self.ctx.settings.max_sample_gap_h))
         ttk.Entry(bar, textvariable=self.gap_var, width=7).pack(side="left")
@@ -92,13 +93,16 @@ class DoseCalculationPage(Page):
         metrics.pack(fill="x", pady=(8, 0))
         self.metric_labels = {}
         for i, (key, title, color) in enumerate((
-                ("actual", "实际量 (mL)", COLORS["accent"]), ("integral", "流速积分 (mL)", COLORS["info"]),
+                ("actual", "设备估算量 (mL)", COLORS["accent"]), ("integral", "流速积分 (mL)", COLORS["info"]),
                 ("deviation", "偏差量 (mL)", COLORS["warning"]), ("deviation_pct", "偏差率 (%)", COLORS["danger"]),
                 ("completion", "完成率 (%)", COLORS["success"]))):
             metrics.grid_columnconfigure(i, weight=1, uniform="m")
             box = tk.Frame(metrics, bg=COLORS["white"])
             box.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 12, 0))
-            tk.Label(box, text=title, bg=COLORS["white"], fg=COLORS["muted"], font=FONT_SMALL).pack(anchor="w")
+            metric_title = tk.Label(box, text=title, bg=COLORS["white"], fg=COLORS["muted"], font=FONT_SMALL)
+            metric_title.pack(anchor="w")
+            if key == "actual":
+                self.actual_title = metric_title
             value = tk.Label(box, text="—", bg=COLORS["white"], fg=color, font=(FONT[0], 18, "bold"))
             value.pack(anchor="w")
             self.metric_labels[key] = value
@@ -134,13 +138,19 @@ class DoseCalculationPage(Page):
         tk.Label(h, text="核算历史", bg=COLORS["white"], fg=COLORS["text"], font=FONT_H3).pack(side="left")
         self.history = DataTable(history_card.body, [
             ("calculation_id", "核算编号", 145), ("pump_code", "泵", 80), ("liquid_name", "液体", 100),
-            ("time_start", "开始", 135), ("time_end", "结束", 135), ("actual_volume_ml", "实际量", 80),
+            ("time_start", "开始", 135), ("time_end", "结束", 135), ("actual_volume_ml", "累计差值", 80),
+            ("value_source", "来源", 100),
             ("completion_percent", "完成率%", 75), ("quality_status", "质量", 75),
             ("calculation_version", "版本", 50),
         ], height=2, id_key="calculation_id", on_select=self._show_saved)
         self.history.pack(fill="x", pady=(6, 0))
 
     # ---------- 刷新 ----------
+    def open_manual(self):
+        if self.app.require_batch():
+            from .manual_feed import ManualFeedWindow
+            ManualFeedWindow(self)
+
     def on_show(self):
         self.refresh()
 
@@ -244,10 +254,13 @@ class DoseCalculationPage(Page):
         result = dose_calc.calculate(rows, planned, start, end, gap)
         self.current_result = result
         self.current_rows = rows
+        self.current_event = self.event_map.get(self.event_var.get())
+        self.result_inputs = (batch_id, pump_id, self.event_var.get(), self.start_var.get(), self.end_var.get(), self.planned_var.get(), self.gap_var.get())
         self._render_result(result, rows)
         self.set_status(f"核算完成：{result['quality_status']}")
 
     def _render_result(self, result: dict, rows: list[dict]):
+        self.actual_title.configure(text="累计差值（来源待核实）" if result.get("value_source") == "来源待核实" else "设备估算量 (mL)")
         status = result.get("quality_status") or "—"
         self.quality_badge.configure(text=f" {status} ")
         colors = {"success": (COLORS["success_soft"], COLORS["success"]),
@@ -293,6 +306,9 @@ class DoseCalculationPage(Page):
         pump_id = self.pump_map.get(self.pump_var.get())
         if not batch_id or not pump_id:
             return
+        if getattr(self, "result_inputs", None) != (batch_id, pump_id, self.event_var.get(), self.start_var.get(), self.end_var.get(), self.planned_var.get(), self.gap_var.get()):
+            error(self, "核算条件已改变，请重新运行核算后再保存。")
+            return
         result = self.current_result
         if result.get("quality_status") == "无效":
             if not confirm(self, "保存无效结果", "质量为“无效”，是否仍保存以保留审计记录？"):
@@ -317,6 +333,7 @@ class DoseCalculationPage(Page):
                 "calculation_method": result.get("calculation_method"),
                 "quality_status": result.get("quality_status"),
                 "data_import_id": data_import_id,
+                "value_source": "导入设备估算",
                 "notes": self.notes_var.get().strip(),
             })
         except Exception as exc:
@@ -338,6 +355,7 @@ class DoseCalculationPage(Page):
             return
         result = {
             "quality_status": full.get("quality_status"),
+            "value_source": full.get("value_source", "来源待核实"),
             "actual_volume_ml": full.get("actual_volume_ml"),
             "flow_integral_ml": full.get("flow_integral_ml"),
             "deviation_ml": full.get("deviation_ml"),
@@ -345,7 +363,7 @@ class DoseCalculationPage(Page):
             "completion_percent": full.get("completion_percent"),
             "planned_volume_ml": full.get("planned_volume_ml"),
             "calculation_method": full.get("calculation_method"),
-            "message": f"历史核算版本 {full.get('calculation_version')} · {human_dt(full.get('calculated_at'))}",
+            "message": f"{full.get('value_source', '来源待核实')} · 历史核算版本 {full.get('calculation_version')} · {human_dt(full.get('calculated_at'))}",
         }
         rows = self.ctx.repos.imports.data_for(full["batch_id"], full["pump_id"],
                                                full["time_start"], full["time_end"])

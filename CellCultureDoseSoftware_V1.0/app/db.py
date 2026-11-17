@@ -281,6 +281,36 @@ CREATE TABLE IF NOT EXISTS dose_calculation (
     notes TEXT
 );
 
+-- 手工抄录保留原始文本与核算快照，不把设备估算量写成独立实测量。
+CREATE TABLE IF NOT EXISTS manual_feed_record (
+    record_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES batch_info(batch_id),
+    event_id TEXT REFERENCES feed_plan_event(event_id),
+    pump_id TEXT NOT NULL REFERENCES pump_info(pump_id),
+    liquid_id TEXT NOT NULL REFERENCES liquid_info(liquid_id),
+    start_time TEXT, end_time TEXT, start_reading TEXT, end_reading TEXT,
+    reading_unit TEXT, intermediate_readings TEXT NOT NULL DEFAULT '[]',
+    known_reset INTEGER NOT NULL DEFAULT 0,
+    measured_value TEXT, measured_unit TEXT, measured_method TEXT,
+    planned_volume_ml REAL, estimate_ml REAL, measured_ml REAL,
+    quality_status TEXT NOT NULL, issues TEXT NOT NULL,
+    equipment_notes TEXT, notes TEXT, created_at TEXT NOT NULL, created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_manual_feed_batch ON manual_feed_record(batch_id);
+
+CREATE TABLE IF NOT EXISTS manual_feed_revision (
+    revision_id TEXT PRIMARY KEY,
+    record_id TEXT NOT NULL REFERENCES manual_feed_record(record_id),
+    action TEXT NOT NULL, before_json TEXT NOT NULL, after_json TEXT NOT NULL,
+    reason TEXT NOT NULL, operator TEXT NOT NULL, created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS commercial_medium_record (
+    record_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_info(batch_id),
+    medium_name TEXT NOT NULL, product_lot TEXT, volume REAL NOT NULL,
+    volume_unit TEXT NOT NULL, used_at TEXT NOT NULL, operator TEXT NOT NULL, notes TEXT
+);
+
 CREATE TABLE IF NOT EXISTS dose_anomaly (
     anomaly_id TEXT PRIMARY KEY,
     batch_id TEXT REFERENCES batch_info(batch_id) ON DELETE CASCADE,
@@ -390,6 +420,14 @@ class Database:
     # ---------- 元数据 ----------
     def init_schema(self) -> None:
         self.conn.executescript(SCHEMA_SQL)
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(dose_calculation)")}
+        if "value_source" not in columns:
+            self.conn.execute("ALTER TABLE dose_calculation ADD COLUMN value_source TEXT NOT NULL DEFAULT '来源待核实'")
+        manual_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(manual_feed_record)")}
+        if "known_reset" not in manual_columns:
+            self.conn.execute("ALTER TABLE manual_feed_record ADD COLUMN known_reset INTEGER NOT NULL DEFAULT 0")
+        if "lifecycle_status" not in manual_columns:
+            self.conn.execute("ALTER TABLE manual_feed_record ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT '已完成'")
         self.conn.commit()
         self.set_setting("schema_version", SCHEMA_VERSION)
 

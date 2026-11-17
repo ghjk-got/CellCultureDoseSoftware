@@ -17,7 +17,7 @@ path = service.create("test")
 print("backup", path, path.stat().st_size)
 info = service.verify(path); print("verify", info)
 assert info["integrity"] == "ok"
-repos.batches.create({"batch_code": "B-2", "status": "进行中", "created_by": "t"})
+repos.batches.create({"batch_code": "B-2", "status": "草稿", "created_by": "t"})
 assert db.scalar("SELECT COUNT(*) FROM batch_info") == 2
 safety = service.restore(path)
 print("restored, safety", safety.name)

@@ -56,7 +56,7 @@ def seed(ctx):
     csv_path.write_text("\n".join(rows), encoding="utf-8-sig")
     table = ctx.dose_import.read(csv_path)
     mapping = ctx.dose_import.suggest_mapping(table.headers)
-    pv = ctx.dose_import.preview(bid, csv_path, None, 1, mapping)
+    pv = ctx.dose_import.preview(bid, csv_path, None, 1, mapping, "mL/h", "mL")
     ctx.dose_import.commit(pv, bid, "tester")
     ctx.settings.last_batch_id = bid
     ctx.settings.save()

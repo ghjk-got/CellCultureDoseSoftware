@@ -93,7 +93,7 @@ def main():
     table = importer.read(csv_path)
     mapping = importer.suggest_mapping(table.headers)
     print("mapping:", mapping)
-    pv = importer.preview(bid, csv_path, None, 1, mapping)
+    pv = importer.preview(bid, csv_path, None, 1, mapping, "mL/h", "mL")
     print("preview:", pv.stats, "errors:", pv.errors[:2])
     assert not pv.errors
     iid = importer.commit(pv, bid, "tester")

@@ -178,7 +178,7 @@ def seed(data_dir: str, reset: bool = False) -> Path:
     importer = DoseImportService(repos, settings)
     table = importer.read(csv_path)
     mapping = importer.suggest_mapping(table.headers)
-    pv = importer.preview(batch_id, csv_path, None, 1, mapping)
+    pv = importer.preview(batch_id, csv_path, None, 1, mapping, "mL/h", "mL")
     if pv.errors:
         print("导入错误：", pv.errors[:5])
     import_id = importer.commit(pv, batch_id, "演示用户", notes="演示导入")
